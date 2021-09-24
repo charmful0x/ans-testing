@@ -28,6 +28,6 @@
     "secure-env": "^1.2.0"
   },
   "engines": {
-    "node": "14.x"
+    "node": "14.17.1"
   }
 }
