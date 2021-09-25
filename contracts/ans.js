@@ -1,7 +1,3 @@
-
-
-
-
 export async function handle(state, action){
 
     const input = action.input
@@ -48,42 +44,9 @@ export async function handle(state, action){
     const ERROR_NOT_INTEGER = "only ineteger values are allowed";
     const ERROR_AMOUNT_TOO_HIGH = "the withdrawal qty is higher than the caller's balance";
     const ERROR_INVALID_WITHDRAWAL_AMOUNT = "only positive, non-zero integers are allowed";
+    const ERROR_LABEL_NOT_OWNED = "the given label is owned by an another user";
+    const ERROR_NO_EXTRA_LABEL_OWNED = "the caller does not own more than one label to switch amongst it";
 
-    if (input.function === "deposit") {
-        const tx = input.tx
-
-        if ( deposits.includes(tx) ) {
-            throw new ContractError(ERROR_DUPLICATED_TX)
-        }
-
-        const txObject = await SmartWeave.unsafeClient.transactions.get(tx)
-        const txOwner = txObject["owner"]
-        const ownerAddress = await SmartWeave.unsafeClient.wallets.ownerToAddress(txOwner)
-
-        if (ownerAddress !== caller) {
-            throw new ContractError(ERROR_INVALID_DEPOSITOR)
-        }
-
-        const fcpTxsValidation = await SmartWeave.contracts.readContractState(WDLT, void 0, true)
-        const validity = fcpTxsValidation["validity"]
-
-        if (! validity[tx] ) {
-            throw new ContractError(ERROR_INVALID_DEPOSIT_TX)
-        }
-
-        // await _validateDepositTransaction(tx, caller);
-        const depositQty = await _getDepositQty(tx);
-
-        if (! balances[caller]) {
-            balances[caller] = 0
-        };
-
-        balances[caller] += depositQty
-        deposits.push(tx)
-
-        return { state }
-
-    };
 
     if (input.function === "setProfile") {
 
@@ -134,9 +97,6 @@ export async function handle(state, action){
             avatar: avatar
         })
 
-        console.log("STATE IN SETPROFILE")
-        console.log(state)
-
         return { state }
     }
 
@@ -177,10 +137,32 @@ export async function handle(state, action){
 
     }
 
+    if (input.function === "switch") {
+        const label = input.label
+
+        _validateArweaveAddress(caller);
+        const desiredLabel = _validateUsername(label, "read");
+
+        const callerIndex = users.findIndex(usr => usr.user === caller)
+        const callerProfile = users[callerIndex]
+
+        if (callerProfile["ownedLabels"].length < 2) {
+            throw new ContractError(ERROR_NO_EXTRA_LABEL_OWNED)
+        }
+
+        if (! callerProfile["ownedLabels"].find(labels => labels.label === desiredLabel)) {
+            throw new ContractError(ERROR_LABEL_NOT_OWNED)
+        }
+
+        users[callerIndex]["currentLabel"] = desiredLabel
+
+        return { state }
+
+    };
+
 
 
     // WDLT ACTIONS
-
 
 
     if (input.function === "getAddressOf") {
@@ -188,11 +170,12 @@ export async function handle(state, action){
         const label = input.label
         const validatedLabel = _getLabel(label);
         const userObject = state.users.find(user => user["currentLabel"] === validatedLabel)
-        const address = userObject["user"]
 
-        if (! address) {
+        if (! userObject) {
             throw new ContractError(ERROR_LABEL_DOES_NOT_RESOLVE)
         }
+
+        const address = userObject["user"]
 
         return {
             result:{
@@ -227,7 +210,24 @@ export async function handle(state, action){
 
         return { state }
 
-    }
+    };
+
+    if (input.function === "deposit") {
+        const tx = input.tx
+
+        await _validateDepositTransaction(tx, caller);
+        const depositQty = await _getDepositQty(tx);
+
+        if (! balances[caller]) {
+            balances[caller] = 0
+        };
+
+        balances[caller] += depositQty
+        deposits.push(tx)
+
+        return { state }
+
+    };
 
 
 
@@ -277,7 +277,9 @@ export async function handle(state, action){
             return normalizedUsername
         }
 
-        if ( users.find(user => ( (user["currentLabel"] === normalizedUsername) || (user["ownedLabels"].includes(normalizedUsername)) )) ) {
+        if ( users.find(user => ( (user["currentLabel"] === normalizedUsername) ||
+             (user["ownedLabels"].findIndex(labels => labels.label === normalizedUsername) !== -1) )) ) {
+            
             throw new ContractError(ERROR_LABEL_ALREADY_ACQUIRED)
         }
 
@@ -377,10 +379,27 @@ export async function handle(state, action){
     }
 
 
-    // async function _validateDepositTransaction(txid, address) {
+    async function _validateDepositTransaction(txid, address) {
 
+        if ( deposits.includes(txid) ) {
+            throw new ContractError(ERROR_DUPLICATED_TX)
+        }
 
-    // }
+        const txObject = await SmartWeave.unsafeClient.transactions.get(txid)
+        const txOwner = txObject["owner"]
+        const ownerAddress = await SmartWeave.unsafeClient.wallets.ownerToAddress(txOwner)
+
+        if (ownerAddress !== address) {
+            throw new ContractError(ERROR_INVALID_DEPOSITOR)
+        }
+
+        const fcpTxsValidation = await SmartWeave.contracts.readContractState(WDLT, void 0, true)
+        const validity = fcpTxsValidation["validity"]
+
+        if (! validity[txid] ) {
+            throw new ContractError(ERROR_INVALID_DEPOSIT_TX)
+        }
+    };
 
     async function _getDepositQty(txid) {
 
@@ -451,8 +470,3 @@ export async function handle(state, action){
     }
 
 }
-
-
-
-
-
